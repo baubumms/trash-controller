@@ -72,6 +72,13 @@ Servo armServo1;
 Servo armServo2;
 Servo turbineController;
 
+int16_t lastSpeed = 0;
+int16_t lastSteer = 0;
+
+#define FILTER_STORE_SIZE 5
+int16_t arm1Store[FILTER_STORE_SIZE];
+int16_t arm2Store[FILTER_STORE_SIZE];
+
 void setup()
 {
   Serial.begin(9600);
@@ -79,15 +86,26 @@ void setup()
 
   armServo1.attach(5);
   armServo2.attach(6);
-  turbineController.attach(11);
+  turbineController.attach(11, 1000, 2000);
+
+  turbineController.writeMicroseconds(700);
+  delay(3000);
+  turbineController.write(0);
+  delay(2000);
 
   pinMode(LED_BUILTIN, OUTPUT);
 
-  turbineController.write(0);
-  delay(750);
-  turbineController.write(90);
-  delay(750);
-  turbineController.write(0);
+  for (auto i = 0; i < FILTER_STORE_SIZE; i++)
+  {
+    arm1Store[i] = 1500;
+  }
+  for (auto i = 0; i < FILTER_STORE_SIZE; i++)
+  {
+    arm2Store[i] = 1500;
+  }
+
+  armServo1.write(0);
+  armServo2.write(0);
 }
 
 uint32_t crc32_for_byte(uint32_t r)
@@ -154,8 +172,30 @@ boolean hoverReceive()
   return false;
 }
 
-int16_t lastSpeed = 0;
-int16_t lastSteer = 0;
+int16_t filter(int16_t newVal, int16_t store[])
+{
+  int16_t last = newVal;
+
+  for (auto i = 0; i < FILTER_STORE_SIZE; i++)
+  {
+    int16_t tmp = store[i];
+    store[i] = last;
+    last = tmp;
+  }
+
+  int32_t sum = 0;
+  for (auto i = 0; i < FILTER_STORE_SIZE; i++)
+  {
+    sum += store[i];
+  }
+
+  return (sum / FILTER_STORE_SIZE);
+}
+
+int lastArm1 = 1500;
+int lastArm2 = 1500;
+
+int8_t flip = 0;
 
 void loop(void)
 {
@@ -166,32 +206,69 @@ void loop(void)
   }
   nextLoop = iNow + LOOP_DELAY;
 
+  int16_t turbine = ppm.latestValidChannelValue(CHANNEL::SWITCH_LEFT, 1000);
   int16_t speed = map(ppm.latestValidChannelValue(CHANNEL::THROTTLE, 1500), 1000, 2000, -1000, 1000);
   int16_t steer = map(ppm.latestValidChannelValue(CHANNEL::STEER, 1500), 1000, 2000, -1000, 1000);
-  int16_t arm1 = map(ppm.latestValidChannelValue(CHANNEL::ARM_1, 1000), 1000, 2000, 500, 2500);
-  int16_t arm2 = map(ppm.latestValidChannelValue(CHANNEL::ARM_2, 1000), 1000, 2000, 500, 2500);
-  int16_t turbine = ppm.latestValidChannelValue(CHANNEL::SWITCH_LEFT, 1000);
+  int16_t arm1 = map(ppm.latestValidChannelValue(CHANNEL::ARM_1, 1500), 1000, 2000, 500, 2500);
+  int16_t arm2 = map(ppm.latestValidChannelValue(CHANNEL::ARM_2, 1500), 1000, 2000, 500, 2500);
 
-  armServo1.writeMicroseconds(arm1);
-  armServo2.writeMicroseconds(arm2);
-  turbineController.writeMicroseconds(turbine);
-
-  if (abs(speed) < 60)
+  if (flip < 4)
   {
-    speed = 0;
+    if (abs(arm1 - lastArm1) < 400)
+    {
+      arm1 = filter(arm1, arm1Store);
+      armServo1.writeMicroseconds(arm1);
+    }
+    if (abs(arm2 - lastArm2) < 400)
+    {
+      arm2 = filter(arm2, arm2Store);
+      armServo2.writeMicroseconds(arm2);
+    }
+    lastArm1 = arm1;
+    lastArm2 = arm2;
+
+    Serial.print("Turbine: ");
+    Serial.println(turbine);
+
+    if (turbine > 1750)
+    {
+      Serial.println("turbine");
+      turbineController.write(180);
+    }
+    else if (turbine > 1350)
+    {
+      turbineController.write(90);
+    }
+    else
+    {
+      turbineController.write(0);
+    }
   }
-  if (abs(steer) < 60)
+  else
   {
-    steer = 0;
+    if (abs(speed) < 60)
+    {
+      speed = 0;
+    }
+    if (abs(steer) < 60)
+    {
+      steer = 0;
+    }
+
+    if (abs(speed - lastSpeed) < 400 && abs(steer - lastSteer) < 400)
+    {
+      hoverSend(speed, steer);
+    }
+
+    lastSpeed = speed;
+    lastSteer = steer;
   }
 
-  if (abs(speed - lastSpeed) < 400 && abs(steer - lastSteer) < 400)
+  flip++;
+  if (flip == 5)
   {
-    hoverSend(speed, steer);
+    flip = 0;
   }
-
-  lastSpeed = speed;
-  lastSteer = steer;
 
   digitalWrite(LED_BUILTIN, (iNow % 2000) < 1000);
 }
