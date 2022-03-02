@@ -194,7 +194,6 @@ int16_t filter(int16_t newVal, int16_t store[])
 
 int lastArm1 = 1500;
 int lastArm2 = 1500;
-
 int8_t flip = 0;
 
 void loop(void)
@@ -206,13 +205,14 @@ void loop(void)
   }
   nextLoop = iNow + LOOP_DELAY;
 
+  bool driveOrSuck = ppm.latestValidChannelValue(CHANNEL::SWITCH_RIGHT, 1000) > 1800;
   int16_t turbine = ppm.latestValidChannelValue(CHANNEL::SWITCH_LEFT, 1000);
   int16_t speed = map(ppm.latestValidChannelValue(CHANNEL::THROTTLE, 1500), 1000, 2000, -1000, 1000);
   int16_t steer = map(ppm.latestValidChannelValue(CHANNEL::STEER, 1500), 1000, 2000, -1000, 1000);
   int16_t arm1 = map(ppm.latestValidChannelValue(CHANNEL::ARM_1, 1500), 1000, 2000, 500, 2500);
   int16_t arm2 = map(ppm.latestValidChannelValue(CHANNEL::ARM_2, 1500), 1000, 2000, 500, 2500);
 
-  if (flip < 4)
+  if (driveOrSuck || flip < 4)
   {
     if (abs(arm1 - lastArm1) < 400)
     {
@@ -233,7 +233,7 @@ void loop(void)
     if (turbine > 1750)
     {
       Serial.println("turbine");
-      turbineController.write(180);
+      turbineController.writeMicroseconds(2500);
     }
     else if (turbine > 1350)
     {
@@ -241,7 +241,7 @@ void loop(void)
     }
     else
     {
-      turbineController.write(0);
+      turbineController.writeMicroseconds(700);
     }
   }
   else
